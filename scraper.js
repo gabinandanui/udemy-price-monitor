@@ -1,11 +1,19 @@
-const puppeteer = require('puppeteer-core');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const chromium = require('@sparticuz/chromium');
+
+puppeteer.use(StealthPlugin());
 
 async function getUdemyPrice(url) {
   let browser;
   try {
     browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+      ],
       defaultViewport: chromium.defaultViewport,
       executablePath: await chromium.executablePath(),
       headless: true,
@@ -13,8 +21,17 @@ async function getUdemyPrice(url) {
 
     const page = await browser.newPage();
 
+    // Mask as real browser
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      window.chrome = { runtime: {} };
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    });
+
     await page.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      process.env.USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     );
 
     // Block images/fonts to load faster
@@ -29,12 +46,18 @@ async function getUdemyPrice(url) {
 
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // Wait extra 3 seconds for JS to render price
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait extra 5 seconds for JS to render price
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     // Debug: log full page HTML to see what's there
     const html = await page.content();
     console.log('📄 Page length:', html.length, 'chars');
+
+    // Check if Cloudflare blocked us
+    if (html.includes('Just a moment') || html.includes('cf-browser-verification')) {
+      console.warn('🚫 Cloudflare detected — blocked!');
+      return null;
+    }
 
     const price = await page.evaluate(() => {
       // Method 1: JSON-LD
@@ -90,7 +113,7 @@ async function getUdemyPrice(url) {
       return price;
     }
 
-    // Debug: dump a snippet of HTML to see what we got
+    // Debug: dump a snippet of HTML
     const snippet = html.substring(0, 2000);
     console.log('🔍 HTML snippet:', snippet);
     console.warn('⚠️ Price not found in page');
