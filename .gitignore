@@ -1,2 +1,8 @@
-node_modules
+# Backend
+node_modules/
 .env
+
+# Dashboard
+dashboard/node_modules/
+dashboard/.env
+dashboard/dist/
